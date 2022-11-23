@@ -1,0 +1,70 @@
+#!/bin/zsh
+
+config=~/.ssh/remembered
+if [ ! -e $config ];then
+	touch $config
+fi
+params=$*
+res=0
+timeout=/opt/homebrew/bin/timeout
+
+clear_ssh()
+{
+	err="$($timeout 5 ssh $params 2>&1 | grep 'has changed and you have requested strict checking' | head -n 1)"
+	echo "ssh clear output: $err"
+
+	if [ ! -z "$err" ];then
+		echo $err | awk '{print $4}' | xargs -I % sed -i '' '/% /d' ~/.ssh/known_hosts
+		sed -i '' "/host: $params/d" $config
+		res=0
+	else
+		res=1
+	fi
+}
+
+do_remember()
+{
+	remembered=$(grep "host: $params" $config)
+	if [ -z "$remembered" ];then
+		ssh-copy-id $params
+		if [ $? -eq 0 ];then
+			echo "host: $params" >> $config
+			res=0
+			echo 'remember: success remember ssh'
+		else
+			clear_ssh
+			if [ $res -eq 0 ];then
+				res=1
+				echo 'remember: success remove old ssh'
+			else
+				res=2
+				echo "remember: can die"
+			fi
+		fi
+	fi
+}
+
+do_remember
+if [ $res -eq 1 ];then
+	do_remember
+elif [ $res -eq 2 ];then
+	exit 1
+fi
+
+echo "begin to connect ssh, param: $params"
+ssh -o ServerAliveInterval=30 $params
+
+if [ $? -eq 0 ];then
+	echo "ssh close normally"
+	exit 0
+fi
+
+echo 'exit unnormal, retry...'
+
+clear_ssh
+if [ $res -eq 0 ];then
+	echo 'ssh config has changed, remove it!'
+	do_remember
+	ssh -o ServerAliveInterval=30 $params
+fi
+
